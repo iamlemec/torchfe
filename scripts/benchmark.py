@@ -26,7 +26,7 @@ def main():
             fe = data.filter(regex=r"^fe", axis=1)
 
             beta, loss, t1, t2 = torchfe.fit(
-                data.y.values, data.x.values, fe.values.T)
+                data['y'].values, data[['x']].values.T, fe.values.T)
 
             bench = bench.append({
                 "filename": fn,
