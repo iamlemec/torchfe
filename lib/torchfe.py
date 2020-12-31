@@ -8,7 +8,7 @@ class CLogLklhd(torch.autograd.Function):
 
     @staticmethod
     def forward(ctx, beta, y, x, fe, fe_sum, fe_dim, fe_counts):
-        resid = y - beta * x - fe_sum
+        resid = y - beta @ x - fe_sum
         for i in range(CLogLklhd.maxiter):
             znorm = 0
             for j in range(fe.shape[0]):
@@ -22,8 +22,9 @@ class CLogLklhd(torch.autograd.Function):
                 if zn > znorm:
                     znorm = zn
             if znorm < CLogLklhd.atol:
+                print(i)
                 break
-        grad = -2 * torch.sum(x * resid)
+        grad = -2 * (x @ resid)
         ctx.save_for_backward(grad)
         return torch.sum(torch.pow(resid, 2))
 
@@ -36,28 +37,26 @@ class CLogLklhd(torch.autograd.Function):
 cloglklhd = CLogLklhd.apply
 
 
-def fit(y, x, fe, maxepochs=100, atol=1e-05):
+def fit(y, x, fe, maxepochs=100, atol=1e-05, device="cuda"):
     t_secs = time.time()
-    y_t = torch.tensor(y, dtype=torch.float32, device="cuda")
-    x_t = torch.tensor(x, dtype=torch.float32, device="cuda")
-    fe_t = torch.tensor(fe, dtype=torch.int64, device="cuda")
+    y_t = torch.tensor(y, dtype=torch.float32, device=device)
+    x_t = torch.tensor(x, dtype=torch.float32, device=device)
+    fe_t = torch.tensor(fe, dtype=torch.int64, device=device)
     t_secs_1 = time.time() - t_secs
 
     fe_dim = fe_t.max(dim=1)[0] + 1
-    fe_counts = []
-    for j in range(len(fe_dim)):
-        fe_counts.append(
-            torch.zeros(fe_dim[j], device="cuda").index_add_(
-                0, fe_t[j], torch.ones_like(y_t)
-            )
-        )
+    one_vec = torch.ones_like(y_t)
+    fe_counts = [
+        torch.zeros(fd, device=device).index_add_(0, fv, one_vec)
+        for fd, fv in zip(fe_dim, fe_t)
+    ]
 
     fe_sum = torch.zeros_like(y_t)
-    beta = torch.tensor(0.0, device="cuda")
+    beta = torch.zeros(x_t.shape[0], dtype=torch.float32, device=device)
     beta = beta.requires_grad_(True)
 
     optimizer = torch.optim.LBFGS([beta])
-    prev_loss = torch.mean(torch.pow(y_t - beta * x_t, 2))
+    prev_loss = torch.mean(torch.pow(y_t - beta @ x_t, 2))
 
     loss = None
     for __ in range(maxepochs):
